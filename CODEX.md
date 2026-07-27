@@ -172,6 +172,7 @@ Container logs are usually lost after container exit because containers run with
 | Doc | Purpose |
 | --- | --- |
 | `docs/NANOAYX-RESUME.md` | Current NanoAYX checkpoint, decisions, verified state, and restart instructions |
+| `docs/knowledge-base.md` | Google Drive boundary, folder layout, mount configuration, and RAG storage policy |
 | `docs/architecture.md` | Full architecture |
 | `docs/db.md` | Three-DB model |
 | `docs/db-central.md` | Central DB schema and migrations |

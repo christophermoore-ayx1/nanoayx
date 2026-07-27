@@ -38,7 +38,10 @@ private_key, .secret
 **Protections:**
 - Symlink resolution before validation (prevents traversal attacks)
 - Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+- Per-root `allowReadWrite` controls whether an explicitly requested
+  read-write mount remains writable or is forced read-only
+- Per-agent-group container configuration determines which approved roots an
+  agent actually receives
 
 **Read-Only Project Root:**
 

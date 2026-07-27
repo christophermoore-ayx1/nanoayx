@@ -89,20 +89,21 @@ Known-good build prefix:
 PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm run build
 ```
 
-## Google Drive Plan
+## Google Drive Configuration
 
-The user is installing Google Drive for Desktop and will restart the Mac.
+Google Drive Desktop is signed into the Alteryx account. The knowledge base is
+currently user-owned in My Drive:
 
-After restart:
+```text
+Drive folder ID: 1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
+Drive URL: https://drive.google.com/drive/folders/1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
+Host path: /Users/christopher.moore/Library/CloudStorage/GoogleDrive-christopher.moore@alteryx.com/My Drive/NanoAYX Knowledge Base
+Container path: /workspace/extra/knowledge/drive
+```
 
-1. Confirm Google Drive Desktop is signed into the Alteryx account.
-2. Decide whether the knowledge base is private in My Drive or
-   organization-owned in a Shared Drive.
-3. Create one top-level folder named `NanoAYX Knowledge Base`.
-4. Mark the folder **Available offline**.
-5. Record its local path under `/Users/christopher.moore/Library/CloudStorage`.
-6. Add only that exact path to NanoClaw's mount allowlist.
-7. Mount it read/write at `/knowledge/drive` for the knowledge agent.
+The folder is available offline. The exact host path is allowlisted for
+read/write access and assigned only to the current `nanoayx` agent group. The
+mount validator and an isolated Docker bind-mount test both pass.
 
 Recommended Drive layout:
 
@@ -119,7 +120,8 @@ NanoAYX Knowledge Base/
 Do not place SQLite databases, vector indexes, lock files, credentials, Git
 worktrees, or NanoClaw runtime state in Google Drive. Store derived indexes in
 a local Docker volume and treat Drive files as canonical source documents and
-human-readable outputs.
+human-readable outputs. See `docs/knowledge-base.md` for the complete boundary
+and implementation status.
 
 ## Journey Knowledge Base Kit
 
@@ -177,7 +179,8 @@ This topology is recommended but still needs explicit confirmation.
 ## Decisions Needed After Restart
 
 1. Confirm this NanoClaw worktree is the canonical project.
-2. Confirm My Drive versus Shared Drive and provide the local folder path.
+2. Decide whether the current My Drive folder should eventually move to an
+   Alteryx Shared Drive for organization ownership.
 3. Confirm the approved OpenAI credential path:
    - Alteryx-managed API key protected through OneCLI, preferred for internal
      use; or
@@ -190,15 +193,13 @@ This topology is recommended but still needs explicit confirmation.
 
 ## Next Execution Steps
 
-1. Re-read this checkpoint and inspect `git status`.
-2. Verify Google Drive's local folder and offline availability.
-3. Start Ollama and list installed models.
-4. Repair the launch-agent failure and complete a Codex CLI smoke test.
-5. Finish the Codex provider security review, especially credential exposure
+1. Start Ollama and list installed models.
+2. Repair the launch-agent failure and complete a Codex CLI smoke test.
+3. Finish the Codex provider security review, especially credential exposure
    inside containers.
-6. Stabilize the Telegram round trip and agent-to-agent delivery.
-7. Implement the Drive mount and knowledge-base adaptation.
-8. Add targeted tests and run constrained full-suite validation.
-9. Build the agent image and run end-to-end Telegram tests.
-10. Merge the target repository's initial commit, update `main`, and document
-    upstream synchronization.
+4. Stabilize the Telegram round trip and agent-to-agent delivery.
+5. Implement the Drive scanner and knowledge-base adaptation.
+6. Add targeted tests and run constrained full-suite validation.
+7. Build the agent image and run end-to-end Telegram tests.
+8. Merge the target repository's initial commit, update `main`, and document
+   upstream synchronization.
