@@ -11,7 +11,7 @@
  *                          prompt. Defaults to $USER.
  *   NANOCLAW_AGENT_NAME    messaging-channel agent name (consumed by the
  *                          channel flow). The CLI scratch agent is always
- *                          "Terminal Agent".
+ *                          "nanoayx".
  *   NANOCLAW_SKIP          comma-separated step names to skip
  *                          (environment|container|onecli|auth|mounts|
  *                           service|cli-agent|timezone|channel|
@@ -58,7 +58,7 @@ import { emit as phEmit } from './lib/diagnostics.js';
 import { accentGreen, brandBody, brandBold, brandChip, dimWrap, fitToWidth, fmtDuration, note, wrapForGutter } from './lib/theme.js';
 import { isValidTimezone } from '../src/timezone.js';
 
-const CLI_AGENT_NAME = 'Terminal Agent';
+const CLI_AGENT_NAME = 'nanoayx';
 const RUN_START = Date.now();
 
 type ChannelChoice = 'telegram' | 'discord' | 'whatsapp' | 'signal' | 'teams' | 'slack' | 'imessage' | 'other' | 'skip';

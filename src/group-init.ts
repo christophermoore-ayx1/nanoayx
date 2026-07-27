@@ -42,9 +42,9 @@ const DEFAULT_SETTINGS_JSON =
  * Source code and skills are shared RO mounts — not copied per-group.
  * Skill symlinks are synced at spawn time by container-runner.ts.
  *
- * The composed `CLAUDE.md` is NOT written here — it's regenerated on every
- * spawn by `composeGroupClaudeMd()` (see `claude-md-compose.ts`). Initial
- * per-group instructions (if provided) seed `CLAUDE.local.md`.
+ * The composed `CODEX.md`/`CLAUDE.md` files are NOT written here — they're
+ * regenerated on every spawn by the instruction composer. Initial per-group
+ * instructions (if provided) seed local memory.
  */
 export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: string }): void {
   const initialized: string[] = [];
@@ -56,12 +56,21 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
     initialized.push('groupDir');
   }
 
-  // groups/<folder>/CLAUDE.local.md — per-group agent memory, auto-loaded by
-  // Claude Code. Seeded with caller-provided instructions on first creation.
+  // groups/<folder>/CODEX.local.md — primary per-group agent memory for
+  // Codex-native runtime. Seeded with caller-provided instructions on first
+  // creation.
+  const codexLocalFile = path.join(groupDir, 'CODEX.local.md');
+  if (!fs.existsSync(codexLocalFile)) {
+    const body = opts?.instructions ? opts.instructions + '\n' : '';
+    fs.writeFileSync(codexLocalFile, body);
+    initialized.push('CODEX.local.md');
+  }
+
+  // Legacy Claude provider memory. Keep it available while the provider
+  // exists, but don't duplicate newly-seeded Codex instructions by default.
   const claudeLocalFile = path.join(groupDir, 'CLAUDE.local.md');
   if (!fs.existsSync(claudeLocalFile)) {
-    const body = opts?.instructions ? opts.instructions + '\n' : '';
-    fs.writeFileSync(claudeLocalFile, body);
+    fs.writeFileSync(claudeLocalFile, '');
     initialized.push('CLAUDE.local.md');
   }
 

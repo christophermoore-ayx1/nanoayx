@@ -23,7 +23,7 @@ import { materializeContainerJson } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars, updateContainerConfigJson } from './db/container-configs.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
-import { composeGroupClaudeMd } from './claude-md-compose.js';
+import { composeGroupInstructionFiles } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
@@ -211,7 +211,7 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
  *
  *   sessions.agent_provider
  *     → container_configs.provider
- *     → 'claude'
+ *     → 'codex'
  *
  * Pure so the precedence can be unit-tested without a DB or filesystem.
  */
@@ -219,7 +219,7 @@ export function resolveProviderName(
   sessionProvider: string | null | undefined,
   containerConfigProvider: string | null | undefined,
 ): string {
-  return (sessionProvider || containerConfigProvider || 'claude').toLowerCase();
+  return (sessionProvider || containerConfigProvider || 'codex').toLowerCase();
 }
 
 function resolveProviderContribution(
@@ -256,18 +256,18 @@ function buildMounts(
   const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
   syncSkillSymlinks(claudeDir, containerConfig);
 
-  // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill
-  // fragments, and MCP server instructions. See `claude-md-compose.ts`.
-  composeGroupClaudeMd(agentGroup);
+  // Compose CODEX.md and legacy CLAUDE.md fresh every spawn from the shared
+  // base, enabled skill fragments, and configured inline instructions.
+  composeGroupInstructionFiles(agentGroup);
 
   const mounts: VolumeMount[] = [];
   const sessDir = sessionDir(agentGroup.id, session.id);
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
 
-  // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
+  // Session folder at /workspace (contains inbound.db, outbound.db, outbox/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
 
-  // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
+  // Agent group folder at /workspace/agent (RW for working files + local memory)
   mounts.push({ hostPath: groupDir, containerPath: '/workspace/agent', readonly: false });
 
   // container.json — nested RO mount on top of RW group dir so the agent
@@ -277,13 +277,19 @@ function buildMounts(
     mounts.push({ hostPath: containerJsonPath, containerPath: '/workspace/agent/container.json', readonly: true });
   }
 
-  // Composer-managed CLAUDE.md artifacts — nested RO mounts. These are
+  // Composer-managed instruction artifacts — nested RO mounts. These are
   // regenerated from the shared base + fragments on every spawn; any
-  // agent-side writes would be clobbered, so enforce read-only. Only
-  // CLAUDE.local.md (per-group memory) remains RW via the group-dir mount.
-  // `.claude-shared.md` is a symlink whose target (`/app/CLAUDE.md`) is
-  // already RO-mounted, so writes through it fail regardless — no need for
-  // a nested mount there.
+  // agent-side writes would be clobbered, so enforce read-only. Local memory
+  // files remain RW via the group-dir mount. Shared-link symlink targets are
+  // already RO-mounted, so writes through them fail regardless.
+  const composedCodexMd = path.join(groupDir, 'CODEX.md');
+  if (fs.existsSync(composedCodexMd)) {
+    mounts.push({ hostPath: composedCodexMd, containerPath: '/workspace/agent/CODEX.md', readonly: true });
+  }
+  const codexFragmentsDir = path.join(groupDir, '.codex-fragments');
+  if (fs.existsSync(codexFragmentsDir)) {
+    mounts.push({ hostPath: codexFragmentsDir, containerPath: '/workspace/agent/.codex-fragments', readonly: true });
+  }
   const composedClaudeMd = path.join(groupDir, 'CLAUDE.md');
   if (fs.existsSync(composedClaudeMd)) {
     mounts.push({ hostPath: composedClaudeMd, containerPath: '/workspace/agent/CLAUDE.md', readonly: true });
@@ -299,8 +305,12 @@ function buildMounts(
     mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
   }
 
-  // Shared CLAUDE.md — read-only, imported by the composed entry point via
-  // the `.claude-shared.md` symlink inside the group dir.
+  // Shared instruction bases — read-only, imported by the composed entry
+  // points via symlinks inside the group dir.
+  const sharedCodexMd = path.join(process.cwd(), 'container', 'CODEX.md');
+  if (fs.existsSync(sharedCodexMd)) {
+    mounts.push({ hostPath: sharedCodexMd, containerPath: '/app/CODEX.md', readonly: true });
+  }
   const sharedClaudeMd = path.join(process.cwd(), 'container', 'CLAUDE.md');
   if (fs.existsSync(sharedClaudeMd)) {
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });

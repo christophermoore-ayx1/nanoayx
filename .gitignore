@@ -13,12 +13,18 @@ logs/
 
 # Groups - per-installation state, not tracked
 groups/*
+!groups/*/
+groups/*/*
 
-# Composer-managed CLAUDE.md artifacts (regenerated every spawn) and
-# per-group memory (CLAUDE.local.md) must never be committed.
+# Composer-managed CLAUDE.md/CODEX.md artifacts (regenerated every spawn) and
+# per-group memory (CLAUDE.local.md/CODEX.local.md) must never be committed.
+groups/*/CODEX.md
 **/CLAUDE.local.md
+**/CODEX.local.md
 **/.claude-shared.md
+**/.codex-shared.md
 **/.claude-fragments/
+**/.codex-fragments/
 
 # Secrets
 *.keys.json

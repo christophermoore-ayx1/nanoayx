@@ -1,18 +1,19 @@
 /**
- * CLAUDE.md composition for agent groups.
+ * Agent instruction composition for agent groups.
  *
  * Replaces the per-group "written once at init, owned by the group" pattern
  * with a host-regenerated entry point that imports:
- *   - a shared base (`container/CLAUDE.md` mounted RO at `/app/CLAUDE.md`)
+ *   - a shared base (`container/CODEX.md` mounted RO at `/app/CODEX.md`)
  *   - optional per-skill fragments (skills that ship `instructions.md`)
  *   - optional per-MCP-server fragments (inline `instructions` field in
  *     `container.json`)
- *   - per-group agent memory (`CLAUDE.local.md`, auto-loaded by Claude Code)
+ *   - per-group agent memory (`CODEX.local.md`)
  *
  * Runs on every spawn from `container-runner.buildMounts()`. Deterministic —
- * same inputs produce the same CLAUDE.md, and stale fragments are pruned.
+ * same inputs produce the same CODEX.md, and stale fragments are pruned.
  *
- * See `docs/claude-md-composition.md` for the full design.
+ * The legacy Claude files are still composed in parallel while the old
+ * provider remains available.
  */
 import fs from 'fs';
 import path from 'path';
@@ -26,6 +27,7 @@ import type { AgentGroup } from './types.js';
 // Symlink targets are container paths — dangling on host (hence the readlink
 // dance instead of existsSync), valid inside the container via RO mounts.
 const SHARED_CLAUDE_MD_CONTAINER_PATH = '/app/CLAUDE.md';
+const SHARED_CODEX_MD_CONTAINER_PATH = '/app/CODEX.md';
 const SHARED_SKILLS_CONTAINER_BASE = '/app/skills';
 const SHARED_MCP_TOOLS_CONTAINER_BASE = '/app/src/mcp-tools';
 
@@ -33,25 +35,18 @@ const SHARED_MCP_TOOLS_CONTAINER_BASE = '/app/src/mcp-tools';
 // Resolved at call time (process.cwd() = project root) so tests can swap cwd.
 const MCP_TOOLS_HOST_SUBPATH = path.join('container', 'agent-runner', 'src', 'mcp-tools');
 
-const COMPOSED_HEADER = '<!-- Composed at spawn — do not edit. Edit CLAUDE.local.md for per-group content. -->';
+const CODEX_COMPOSED_HEADER = '<!-- Composed at spawn - do not edit. Edit CODEX.local.md for per-group content. -->';
+const CLAUDE_COMPOSED_HEADER = '<!-- Composed at spawn - do not edit. Edit CLAUDE.local.md for per-group content. -->';
 
 /**
- * Regenerate `groups/<folder>/CLAUDE.md` from the shared base, enabled skill
- * fragments, and MCP server fragments declared in `container.json`. Creates
- * an empty `CLAUDE.local.md` if missing.
+ * Regenerate `groups/<folder>/CODEX.md` and legacy `CLAUDE.md` from the
+ * shared base, enabled skill fragments, and MCP server fragments declared in
+ * `container.json`. Creates empty local memory files if missing.
  */
-export function composeGroupClaudeMd(group: AgentGroup): void {
+export function composeGroupInstructionFiles(group: AgentGroup): void {
   const groupDir = path.resolve(GROUPS_DIR, group.folder);
   if (!fs.existsSync(groupDir)) {
     fs.mkdirSync(groupDir, { recursive: true });
-  }
-
-  const sharedLink = path.join(groupDir, '.claude-shared.md');
-  syncSymlink(sharedLink, SHARED_CLAUDE_MD_CONTAINER_PATH);
-
-  const fragmentsDir = path.join(groupDir, '.claude-fragments');
-  if (!fs.existsSync(fragmentsDir)) {
-    fs.mkdirSync(fragmentsDir, { recursive: true });
   }
 
   // Desired fragment set.
@@ -106,13 +101,56 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
     }
   }
 
+  composeOneFormat({
+    groupDir,
+    entryFile: 'CODEX.md',
+    localFile: 'CODEX.local.md',
+    sharedLinkFile: '.codex-shared.md',
+    sharedTarget: SHARED_CODEX_MD_CONTAINER_PATH,
+    fragmentsDirName: '.codex-fragments',
+    header: CODEX_COMPOSED_HEADER,
+    desired,
+  });
+
+  composeOneFormat({
+    groupDir,
+    entryFile: 'CLAUDE.md',
+    localFile: 'CLAUDE.local.md',
+    sharedLinkFile: '.claude-shared.md',
+    sharedTarget: SHARED_CLAUDE_MD_CONTAINER_PATH,
+    fragmentsDirName: '.claude-fragments',
+    header: CLAUDE_COMPOSED_HEADER,
+    desired,
+  });
+}
+
+// Compatibility export for older call sites and tests.
+export const composeGroupClaudeMd = composeGroupInstructionFiles;
+
+function composeOneFormat(opts: {
+  groupDir: string;
+  entryFile: string;
+  localFile: string;
+  sharedLinkFile: string;
+  sharedTarget: string;
+  fragmentsDirName: string;
+  header: string;
+  desired: Map<string, { type: 'symlink' | 'inline'; content: string }>;
+}): void {
+  syncSymlink(path.join(opts.groupDir, opts.sharedLinkFile), opts.sharedTarget);
+
+  const fragmentsDir = path.join(opts.groupDir, opts.fragmentsDirName);
+  if (!fs.existsSync(fragmentsDir)) {
+    fs.mkdirSync(fragmentsDir, { recursive: true });
+  }
+
   // Reconcile: drop stale, write desired.
   for (const existing of fs.readdirSync(fragmentsDir)) {
-    if (!desired.has(existing)) {
+    if (!opts.desired.has(existing)) {
       fs.unlinkSync(path.join(fragmentsDir, existing));
     }
   }
-  for (const [name, frag] of desired) {
+  for (const [name, frag] of opts.desired) {
     const fragPath = path.join(fragmentsDir, name);
     if (frag.type === 'symlink') {
       syncSymlink(fragPath, frag.content);
@@ -122,14 +160,14 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   }
 
   // Composed entry — imports only.
-  const imports = ['@./.claude-shared.md'];
-  for (const name of [...desired.keys()].sort()) {
-    imports.push(`@./.claude-fragments/${name}`);
+  const imports = [`@./${opts.sharedLinkFile}`];
+  for (const name of [...opts.desired.keys()].sort()) {
+    imports.push(`@./${opts.fragmentsDirName}/${name}`);
   }
-  const body = [COMPOSED_HEADER, ...imports, ''].join('\n');
-  writeAtomic(path.join(groupDir, 'CLAUDE.md'), body);
+  const body = [opts.header, ...imports, ''].join('\n');
+  writeAtomic(path.join(opts.groupDir, opts.entryFile), body);
 
-  const localFile = path.join(groupDir, 'CLAUDE.local.md');
+  const localFile = path.join(opts.groupDir, opts.localFile);
   if (!fs.existsSync(localFile)) {
     fs.writeFileSync(localFile, '');
   }
@@ -186,6 +224,51 @@ export function migrateGroupsToClaudeLocal(): void {
   if (actions.length > 0) {
     log.info('Migrated groups to CLAUDE.local.md model', { actions });
   }
+}
+
+/**
+ * One-time cutover from hand-written group CODEX.md files to the composed
+ * CODEX.md + CODEX.local.md model. Idempotent and conservative:
+ * generated-looking CODEX.md files are left for the composer to replace, and
+ * existing CODEX.local.md files are never overwritten.
+ */
+export function migrateGroupsToCodexLocal(): void {
+  if (!fs.existsSync(GROUPS_DIR)) return;
+
+  const actions: string[] = [];
+
+  for (const entry of fs.readdirSync(GROUPS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === 'global') continue;
+
+    const groupDir = path.join(GROUPS_DIR, entry.name);
+    const oldGlobalLink = path.join(groupDir, '.codex-global.md');
+    try {
+      fs.lstatSync(oldGlobalLink);
+      fs.unlinkSync(oldGlobalLink);
+      actions.push(`${entry.name}/.codex-global.md removed`);
+    } catch {
+      /* already gone */
+    }
+
+    const codexMd = path.join(groupDir, 'CODEX.md');
+    const codexLocal = path.join(groupDir, 'CODEX.local.md');
+    if (fs.existsSync(codexMd) && !fs.existsSync(codexLocal)) {
+      const body = fs.readFileSync(codexMd, 'utf-8');
+      if (!isComposedInstructionFile(body)) {
+        fs.renameSync(codexMd, codexLocal);
+        actions.push(`${entry.name}/CODEX.md -> CODEX.local.md`);
+      }
+    }
+  }
+
+  if (actions.length > 0) {
+    log.info('Migrated groups to CODEX.local.md model', { actions });
+  }
+}
+
+function isComposedInstructionFile(body: string): boolean {
+  return body.startsWith('<!-- Composed at spawn');
 }
 
 function syncSymlink(linkPath: string, target: string): void {

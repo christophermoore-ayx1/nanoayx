@@ -11,6 +11,7 @@ import fs from 'fs';
 
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
+import { getSession } from '../../db/sessions.js';
 import { replaceDestinations, type DestinationRow } from '../../db/session-db.js';
 import { log } from '../../log.js';
 import { inboundDbPath, openInboundDb } from '../../session-manager.js';
@@ -45,6 +46,35 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
         channel_type: null,
         platform_id: null,
         agent_group_id: ag.id,
+      });
+    }
+  }
+
+  // Guarantee the session's current origin chat is addressable even when the
+  // wiring was created out-of-band (for example, direct SQL during setup)
+  // and therefore never minted a central agent_destinations row.
+  const session = getSession(sessionId);
+  if (session?.messaging_group_id) {
+    const origin = getMessagingGroup(session.messaging_group_id);
+    const alreadyProjected = resolved.some(
+      (row) =>
+        row.type === 'channel' && row.channel_type === origin?.channel_type && row.platform_id === origin?.platform_id,
+    );
+    if (origin && !alreadyProjected) {
+      let name = 'origin';
+      let suffix = 2;
+      const taken = new Set(resolved.map((row) => row.name));
+      while (taken.has(name)) {
+        name = `origin-${suffix}`;
+        suffix++;
+      }
+      resolved.unshift({
+        name,
+        display_name: origin.name ?? 'Current chat',
+        type: 'channel',
+        channel_type: origin.channel_type,
+        platform_id: origin.platform_id,
+        agent_group_id: null,
       });
     }
   }

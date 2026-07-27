@@ -29,6 +29,7 @@ import {
   clearOutbox,
 } from './session-manager.js';
 import { getSession, findSession } from './db/sessions.js';
+import { writeDestinations } from './modules/agent-to-agent/write-destinations.js';
 import type { InboundEvent } from './channels/adapter.js';
 
 // Mock container runner to prevent actual Docker spawning
@@ -805,6 +806,61 @@ describe('writeSessionRouting', () => {
     expect(row!.channel_type).toBe('discord');
     expect(row!.platform_id).toBe('chan-123');
     expect(row!.thread_id).toBe('thread-77');
+  });
+});
+
+describe('writeDestinations', () => {
+  it('projects the session origin chat when no central destination row exists for it', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'telegram',
+      platform_id: 'telegram:12345',
+      name: null,
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      created_at: now(),
+    });
+
+    // Simulate an out-of-band wiring that bypassed createMessagingGroupAgent()
+    // and therefore never created a matching agent_destinations row.
+    getDb()
+      .prepare(
+        `INSERT INTO messaging_group_agents (
+           id, messaging_group_id, agent_group_id,
+           engage_mode, engage_pattern, sender_scope, ignored_message_policy,
+           session_mode, priority, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('mga-1', 'mg-1', 'ag-1', 'pattern', '.', 'all', 'drop', 'shared', 0, now());
+
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    writeDestinations('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const rows = db
+      .prepare('SELECT name, display_name, channel_type, platform_id FROM destinations ORDER BY name')
+      .all() as Array<{
+      name: string;
+      display_name: string | null;
+      channel_type: string | null;
+      platform_id: string | null;
+    }>;
+    db.close();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      name: 'origin',
+      display_name: 'Current chat',
+      channel_type: 'telegram',
+      platform_id: 'telegram:12345',
+    });
   });
 });
 
