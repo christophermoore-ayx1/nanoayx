@@ -1,235 +1,462 @@
-<p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
-</p>
+# NanoAYX
 
-<p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
-</p>
+NanoAYX is an internal Alteryx AI work system based on the NanoClaw runtime.
+It provides a Telegram-controlled coordinator, isolated specialist agents,
+GPT-5.4 for complex work, Ollama for local lightweight text work, and a
+Dockerized knowledge service backed by a designated Google Drive folder.
 
-<p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
-  <a href="https://docs.nanoclaw.dev">docs</a>&nbsp; • &nbsp;
-  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="repo tokens" valign="middle"></a>
-</p>
+The system is designed for internal engineering, analysis, automation, and
+knowledge work where an operator needs to delegate tasks to purpose-built
+agents while keeping files, credentials, model access, and runtime state
+separated by boundary.
 
----
+## Current Status
 
-## NanoAYX Fork
+The deployed profile is operational on macOS with:
 
-This repository is the internal Alteryx-oriented NanoAYX fork. Its deployed
-profile uses Telegram, a GPT-5.4 coordinator and implementation agent, a
-tool-free local Ollama text worker, and a Dockerized knowledge service backed
-by a designated Google Drive Desktop folder.
+- Telegram as the operator channel.
+- Naya as the GPT-5.4 coordinator.
+- Forge as the GPT-5.4 implementation and Alteryx specialist.
+- Scribe as the local Ollama text worker.
+- A Dockerized knowledge service connected to Google Drive Desktop.
+- Ollama running natively for Metal acceleration and local inference.
+- OneCLI and PostgreSQL providing credential and supporting infrastructure.
+- Per-session agent containers running the Bun agent runner.
 
-Start with:
+The active development branch is `codex-provider-stabilization` in the
+[NanoAYX GitHub repository](https://github.com/christophermoore-ayx1/nanoayx).
 
-- [NanoAYX resume checkpoint](docs/NANOAYX-RESUME.md)
-- [Deployment and recovery](docs/deployment.md)
-- [Knowledge-base boundary](docs/knowledge-base.md)
-- [Local Ollama provider](docs/ollama.md)
+## What It Is Used For
 
-The remaining README describes the NanoClaw foundation and upstream behavior.
+NanoAYX is intended for:
 
-## Why I Built NanoClaw
+- Researching Alteryx, project, process, and engineering documentation.
+- Searching the internal knowledge base and returning source citations.
+- Drafting briefs, plans, decision records, and technical documentation.
+- Delegating complex coding, repository, workflow, and Alteryx work to Forge.
+- Delegating summarization, extraction, classification, and text cleanup to Scribe.
+- Creating generated notes and reviewable outputs in the designated Drive area.
+- Running multi-step work through Telegram without exposing the host filesystem
+  or Docker socket to an agent.
+- Extending the system with new agents, providers, channels, MCP tools, and
+  scheduled workflows.
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
+Typical operator requests are sent to Naya in Telegram. Naya decides whether
+to answer directly, search the knowledge base, delegate to Forge or Scribe, or
+combine several results into a final response.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+## System at a Glance
 
-## Quick Start
+```text
+Telegram
+   |
+   v
+NanoAYX host supervisor
+   |-- inbound routing and permissions
+   |-- session lifecycle and Docker orchestration
+   |-- outbound delivery and Telegram adapter
+   |-- OneCLI credential integration
+   |
+   +--> per-session Docker agent container
+   |       Bun agent-runner
+   |          |-- Codex / GPT-5.4 provider
+   |          |-- Ollama provider
+   |          |-- MCP tools
+   |          +-- inbound.db -> outbound.db
+   |
+   +--> nanoayx-knowledge container
+   |       FastAPI + SQLite vector index
+   |       Google Drive Desktop mount
+   |       host Ollama embeddings
+   |
+   +--> native Ollama
+   +--> OneCLI and PostgreSQL containers
+```
+
+The host supervisor is trusted infrastructure. Agents are workers. The
+knowledge service is a separate application boundary. No application
+container receives the Docker socket.
+
+## Agent Topology
+
+Agent groups are independently configured and receive their provider, model,
+reasoning effort, workspace, memory, permissions, and destinations at spawn.
+
+| Agent | Provider | Model | Current responsibility |
+| --- | --- | --- | --- |
+| Naya | `codex` | `gpt-5.4`, high effort | Telegram coordinator, retrieval, delegation, synthesis, final responses |
+| Forge | `codex` | `gpt-5.4`, high effort | Complex implementation, repository changes, Alteryx workflows, technical investigation |
+| Scribe | `ollama` | `lfm2.5:8b` | Summarization, extraction, classification, rewriting, and other tool-free text work |
+
+### Naya: Coordinator
+
+Naya is the primary Telegram-facing agent. It understands the operator's
+request, chooses an execution path, uses knowledge retrieval when a response
+depends on internal material, and delegates work that benefits from a
+specialist. Naya uses GPT-5.4 for reliable tool use, multi-step reasoning,
+delegation, and grounded synthesis.
+
+### Forge: Implementation Specialist
+
+Forge is a peer agent created and addressed through NanoAYX's agent-to-agent
+routing. It runs in its own session container with the same GPT-5.4 Codex
+profile. Forge is the preferred destination for code changes, repository
+analysis, Alteryx Designer work, testing, and technical execution.
+
+### Scribe: Local Text Worker
+
+Scribe runs through the Ollama provider and is intentionally stateless and
+tool-free. Naya should send Scribe all required source text together with a
+self-contained transformation request. Scribe is appropriate for low-risk,
+local work where MCP tools, filesystem access, and complex reasoning are not
+needed. It should not be expected to search Drive or modify repositories.
+
+### Adding an Agent
+
+An agent is an agent group plus a workspace and provider configuration:
+
+1. Create the agent group and workspace.
+2. Give it focused `CODEX.md` or local instructions.
+3. Choose its provider, model, effort, and allowed mounts.
+4. Add only the destinations and MCP tools it needs.
+5. Test a direct request and an agent-to-agent round trip.
+6. Document its contract and update the topology table above.
+
+Provider configuration is materialized when a session container is spawned;
+restart the group after changing provider settings.
+
+## Component Architecture
+
+```mermaid
+flowchart LR
+    TG[Telegram] --> AD[Telegram adapter]
+    AD --> HS[Host supervisor]
+    HS --> RT[Router and permissions]
+    RT --> CDB[(Central SQLite DB)]
+    RT --> SID[Session manager]
+    SID --> IN[(inbound.db)]
+    IN --> AR[Per-session agent-runner]
+    AR --> CP[Codex provider]
+    AR --> OP[Ollama provider]
+    AR --> MCP[MCP tools]
+    AR --> OUT[(outbound.db)]
+    OUT --> DL[Host delivery]
+    DL --> AD
+    MCP --> KB[nanoayx-knowledge]
+    KB --> KDB[(knowledge.db volume)]
+    KB --> GD[Google Drive Desktop folder]
+    KB --> EMB[Native Ollama embeddings]
+    HS --> OC[OneCLI Agent Vault]
+    OC --> PG[(PostgreSQL)]
+    CP --> OA[OpenAI / GPT-5.4]
+    OP --> OL[Native Ollama / lfm2.5:8b]
+```
+
+### Host Supervisor
+
+The Node.js host owns channel adapters, routing, permissions, the central
+database, session lifecycle, Docker container creation, outbound delivery,
+stale-session recovery, and scheduled wakeups.
+
+| Area | Code |
+| --- | --- |
+| Entry point and service wiring | `src/index.ts` |
+| Inbound routing | `src/router.ts` |
+| Session resolution | `src/session-manager.ts` |
+| Container lifecycle | `src/container-runner.ts`, `src/container-restart.ts` |
+| Outbound delivery | `src/delivery.ts` |
+| Stale detection and scheduled work | `src/host-sweep.ts` |
+| Central schema and migrations | `src/db/` |
+| Channel infrastructure | `src/channels/` |
+| Host-side provider setup | `src/providers/` |
+
+### Agent Container
+
+Each active session runs in a separate Docker container. The container runs a
+Bun-based agent runner and has access only to explicitly mounted workspace,
+memory, skills, session databases, and provider-specific configuration.
+
+The runner polls `inbound.db`, formats messages, calls the selected provider,
+exposes built-in MCP tools, parses
+`<message to="destination">...</message>` blocks, and writes outbound
+messages to `outbound.db`. It does not use stdin protocols, host IPC files,
+or the Docker socket.
+
+### Provider Layer
+
+The provider abstraction lives under
+`container/agent-runner/src/providers/`. Providers expose a common query,
+push, end, abort, continuation, and event interface. Current providers include
+Codex and Ollama, with mock providers for tests. Host-side provider
+contributions can add environment variables and provider-specific mounts
+without changing the core container lifecycle.
+
+### Knowledge Service
+
+`services/knowledge` is a FastAPI service in its own container. It:
+
+- Scans the configured Google Drive Desktop directory incrementally.
+- Hashes source files and removes stale index records.
+- Extracts Markdown, text, CSV, JSON, YAML, HTML, PDF, and DOCX.
+- Chunks content and requests embeddings from native Ollama.
+- Stores derived documents, chunks, vectors, and errors in a named volume.
+- Provides search, ingest, statistics, and controlled generated-output writes.
+
+The service is exposed to the host at `http://127.0.0.1:8787` and to agent
+containers as `http://nanoayx-knowledge:8787` on the private
+`nanoayx-runtime` network.
+
+## End-to-End Process Flow
+
+1. The operator sends a message to the NanoAYX Telegram bot.
+2. The Telegram adapter validates and normalizes the inbound event.
+3. The host resolves the user, messaging group, agent group, and session.
+4. The host writes the event to that session's `inbound.db`.
+5. The supervisor starts or wakes the session's Docker container.
+6. The Bun agent-runner claims pending rows and builds the provider prompt.
+7. Codex runs GPT-5.4 for complex reasoning, tools, files, and delegation, or
+   Ollama runs a local tool-free text transformation.
+8. MCP calls may search the knowledge service, ingest sources, inspect stats,
+   or write an approved generated output.
+9. Agent-to-agent messages are written as routed outbound rows and wake the
+   destination agent's session.
+10. Final response blocks become `outbound.db` rows.
+11. The host delivery loop validates and delivers those rows through Telegram.
+12. Delivery state and platform message identifiers are recorded for recovery.
+
+### SQLite Message Boundary
+
+Each session uses two SQLite files with a single-writer rule:
+
+```text
+Host supervisor  --writes--> inbound.db  --reads--> agent container
+Agent container  --writes--> outbound.db --reads--> host supervisor
+```
+
+This avoids SQLite write contention across Docker Desktop file mounts. The
+host owns inbound state; the container owns outbound state. See
+[`docs/db.md`](docs/db.md) for the schema contract.
+
+### Duplicate Protection
+
+Providers can emit the same completed response more than once when a
+follow-up arrives while a prior turn is finalizing. The agent runner keeps an
+active-query idempotency set keyed by reply context, destination, and body.
+Repeated results are suppressed before they become outbound rows, while
+different destinations and separate user wakes remain independent.
+
+This protects the observed duplicate-result failure mode. Persistent
+exactly-once delivery across a process crash remains a future enhancement and
+would require a durable outbound idempotency key and delivery contract.
+
+## Knowledge Base and Google Drive
+
+The canonical knowledge boundary is the designated Drive folder:
+
+- [NanoAYX Knowledge Base](https://drive.google.com/drive/folders/1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8)
+- Folder ID: `1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8`
+
+Recommended structure:
+
+```text
+NanoAYX Knowledge Base/
+  00 Inbox/
+  10 Sources/
+  20 Notes/
+  30 Projects/
+  40 Generated/
+  90 Archive/
+```
+
+The scanner reads source folders. Agent-generated writes are restricted to
+`40 Generated` and are atomic. Google Drive Desktop supplies authentication
+and filesystem synchronization; the knowledge service does not contain Drive
+credentials.
+
+Native `.gdoc`, `.gsheet`, and `.gslides` pointer files do not contain
+the underlying document body and are recorded as ingestion errors. An
+authenticated Drive API exporter is required if native Google Workspace files
+must be indexed directly.
+
+See [`docs/knowledge-base.md`](docs/knowledge-base.md) for configuration,
+supported formats, API endpoints, MCP tools, and storage boundaries.
+
+## Deployment Model
+
+### Native on the Mac
+
+- Google Drive Desktop: authenticated filesystem source boundary.
+- Ollama: Metal-accelerated local inference and embeddings.
+- NanoAYX supervisor: trusted lifecycle, routing, and channel process.
+
+### Dockerized
+
+- Per-session agent workers.
+- `nanoayx-knowledge` FastAPI service.
+- Named `nanoayx-kb-data` knowledge index volume.
+- OneCLI and PostgreSQL supporting services.
+
+Telegram remains an installed adapter in the trusted supervisor. Moving it to
+another container would add a credential and delivery hop without improving
+the current security boundary.
+
+### Startup and Recovery
+
+From the canonical worktree:
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
-cd nanoclaw-v2
-bash nanoclaw.sh
+cd /Users/christopher.moore/Projects/NanoAYX/nanoclaw
+docker start onecli-postgres-1 onecli
+docker compose --env-file .env.knowledge up -d knowledge
+PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm run build
+/bin/zsh -lc 'launchctl kickstart -k gui/$(id -u)/com.nanoclaw-v2-2f3dfabc'
 ```
 
-`nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with OneCLI, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
-
-<details>
-<summary><strong>Migrating from NanoClaw v1?</strong></summary>
-
-Run from a fresh v2 checkout next to your v1 install:
+The knowledge service should report healthy at:
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
-cd nanoclaw-v2
-bash migrate-v2.sh
+curl http://127.0.0.1:8787/health
 ```
 
-`migrate-v2.sh` finds your v1 install (sibling directory, or `NANOCLAW_V1_PATH=/path/to/nanoclaw`), migrates state into the v2 checkout, then `exec`s into Claude Code to finish the parts that need judgment (owner seeding, CLAUDE.local.md cleanup, fork-customisation replay).
+The full recovery checkpoint is [`docs/NANOAYX-RESUME.md`](docs/NANOAYX-RESUME.md).
+Deployment details and runtime boundaries are in
+[`docs/deployment.md`](docs/deployment.md).
 
-Run the script directly, not from inside a Claude session — the deterministic side needs interactive prompts and real shell I/O for Node/pnpm bootstrap, Docker, OneCLI, and the container build.
+## Configuration
 
-**What it does:** merges `.env`, seeds the v2 DB from `registered_groups`, copies group folders + session data + scheduled tasks, installs the channel adapters you select, copies channel auth state (including Baileys keystore + LID mappings for WhatsApp), builds the agent container.
+Copy `config/knowledge.env.example` to an ignored local
+`.env.knowledge` and set the local Google Drive Desktop path. Do not commit
+`.env`, `.env.knowledge`, credentials, `data/`, session databases, logs,
+or Drive contents.
 
-**What it doesn't:** flip the system service. Pick *"switch to v2"* at the prompt, or do it manually after testing — your v1 install is left untouched.
-
-See [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md) for what's different and [docs/migration-dev.md](docs/migration-dev.md) for development notes.
-
-</details>
-
-## Philosophy
-
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
-
-**Secure by isolation.** Agents run in Linux containers and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
-
-**AI-native, hybrid by design.** The install and onboarding flow is an optimized scripted path, fast and deterministic. When a step needs judgment, whether a failed install, a guided decision, or a customization, control hands off to Claude Code seamlessly. Beyond setup there's no monitoring dashboard or debugging UI either: describe the problem in chat and Claude Code handles it.
-
-**Skills over features.** Trunk ships the registry and infrastructure, not specific channel adapters or alternative agent providers. Channels (Discord, Slack, Telegram, WhatsApp, …) live on a long-lived `channels` branch; alternative providers (OpenCode, Ollama) live on `providers`. You run `/add-telegram`, `/add-opencode`, etc. and the skill copies exactly the module(s) you need into your fork. No feature you didn't ask for.
-
-**Best harness, best model.** NanoClaw natively uses Claude Code via Anthropic's official Claude Agent SDK, so you get the latest Claude models and Claude Code's full toolset, including the ability to modify and expand your own NanoClaw fork. Other providers are drop-in options: `/add-codex` for OpenAI's Codex (ChatGPT subscription or API key), `/add-opencode` for OpenRouter, Google, DeepSeek and more via OpenCode, and `/add-ollama-provider` for local open-weight models. Provider is configurable per agent group.
-
-## What It Supports
-
-- **Multi-channel messaging** — WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Matrix, Google Chat, Webex, Linear, GitHub, WeChat, and email via Resend. Installed on demand with `/add-<channel>` skills. Run one or many at the same time.
-- **Flexible isolation** — connect each channel to its own agent for full privacy, share one agent across many channels for unified memory with separate conversations, or fold multiple channels into a single shared session so one conversation spans many surfaces. Pick per channel via `/manage-channels`. See [docs/isolation-model.md](docs/isolation-model.md).
-- **Per-agent workspace** — each agent group has its own `CLAUDE.md`, its own memory, its own container, and only the mounts you allow. Nothing crosses the boundary unless you wire it to.
-- **Scheduled tasks** — recurring jobs that run Claude and can message you back
-- **Web access** — search and fetch content from the web
-- **Container isolation** — agents are sandboxed in Docker (macOS/Linux/WSL2), with optional [Docker Sandboxes](docs/docker-sandboxes.md) micro-VM isolation or Apple Container as a macOS-native opt-in
-- **Credential security** — agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
-```
-
-From a channel you own or administer, you can manage groups and tasks:
-```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
-```
-
-## Customizing
-
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for guided changes.
-
-The codebase is small enough that Claude can safely modify it.
-
-## Contributing
-
-**Don't add features. Add skills.**
-
-If you want to add a new channel or agent provider, don't add it to trunk. New channel adapters land on the `channels` branch; new agent providers land on `providers`. Users install them in their own fork with `/add-<name>` skills, which copy the relevant module(s) into the standard paths, wire the registration, and pin dependencies.
-
-This keeps trunk as pure registry and infra, and every fork stays lean — users get the channels and providers they asked for and nothing else.
-
-### RFS (Request for Skills)
-
-Skills we'd like to see:
-
-**Communication Channels**
-- `/add-signal` — Add Signal as a channel
-
-## Requirements
-
-- macOS or Linux (Windows via WSL2)
-- Node.js 20+ and pnpm 10+ (the installer will install both if missing)
-- [Docker Desktop](https://docker.com/products/docker-desktop) (macOS/Windows) or Docker Engine (Linux)
-- [Claude Code](https://claude.ai/download) for `/customize`, `/debug`, error recovery during setup, and all `/add-<channel>` skills
-
-## Architecture
-
-```
-messaging apps → host process (router) → inbound.db → container (Bun, Claude Agent SDK) → outbound.db → host process (delivery) → messaging apps
-```
-
-A single Node host orchestrates per-session agent containers. When a message arrives, the host routes it via the entity model (user → messaging group → agent group → session), writes it to the session's `inbound.db`, and wakes the container. The agent-runner inside the container polls `inbound.db`, runs Claude, and writes responses to `outbound.db`. The host polls `outbound.db` and delivers back through the channel adapter.
-
-Two SQLite files per session, each with exactly one writer — no cross-mount contention, no IPC, no stdin piping. Channels and alternative providers self-register at startup; trunk ships the registry and the Chat SDK bridge, while the adapters themselves are skill-installed per fork.
-
-For the full architecture writeup see [docs/architecture.md](docs/architecture.md); for the three-level isolation model see [docs/isolation-model.md](docs/isolation-model.md).
-
-Key files:
-- `src/index.ts` — entry point: DB init, channel adapters, delivery polls, sweep
-- `src/router.ts` — inbound routing: messaging group → agent group → session → `inbound.db`
-- `src/delivery.ts` — polls `outbound.db`, delivers via adapter, handles system actions
-- `src/host-sweep.ts` — 60s sweep: stale detection, due-message wake, recurrence
-- `src/session-manager.ts` — resolves sessions, opens `inbound.db` / `outbound.db`
-- `src/container-runner.ts` — spawns per-agent-group containers, OneCLI credential injection
-- `src/db/` — central DB (users, roles, agent groups, messaging groups, wiring, migrations)
-- `src/channels/` — channel adapter infra (adapters installed via `/add-<channel>` skills)
-- `src/providers/` — host-side provider config (`claude` baked in; others via skills)
-- `container/agent-runner/` — Bun agent-runner: poll loop, MCP tools, provider abstraction
-- `groups/<folder>/` — per-agent-group filesystem (`CLAUDE.md`, skills, container config)
-
-## FAQ
-
-**Why Docker?**
-
-Docker provides cross-platform support (macOS, Linux and Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
-
-**Can I run this on Linux or Windows?**
-
-Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Just run `bash nanoclaw.sh`.
-
-**Is this secure?**
-
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials never enter the container — outbound API requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
-
-**Why no configuration files?**
-
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
-
-**Can I use third-party or open-source models?**
-
-Yes. The supported path is `/add-opencode` (OpenRouter, OpenAI, Google, DeepSeek, and more via OpenCode config) or `/add-ollama-provider` (local open-weight models via Ollama). Both are configurable per agent group, so different agents can run on different backends in the same install.
-
-For one-off experiments, any Claude API-compatible endpoint also works via `.env`:
+Provider settings are stored per agent group and materialized on container
+spawn. Example Ollama configuration:
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+ncl groups config update --id <agent-group-id> --provider ollama --model lfm2.5:8b
+ncl groups restart --id <agent-group-id>
 ```
 
-**How do I debug issues?**
+Codex sessions use the host's Codex authentication copied into a private
+per-session directory. OpenAI credentials are not placed in the general
+workspace or exposed to unrelated containers. OneCLI remains the credential
+boundary for supported outbound services.
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
+## Extending NanoAYX
 
-**Why isn't the setup working for me?**
+### New Provider
 
-If a step fails, `nanoclaw.sh` hands off to Claude Code to diagnose and resume. If that doesn't resolve it, run `claude`, then `/debug`. If Claude identifies an issue likely to affect other users, open a PR against the relevant setup step or skill.
+Implement `AgentProvider` under
+`container/agent-runner/src/providers/`, register it in the factory, and add
+a host-side contribution under `src/providers/` if it needs mounts or
+environment variables. Add provider tests, a container smoke test, and a
+documented routing policy.
 
-**What changes will be accepted into the codebase?**
+### New Channel
 
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+Implement the channel adapter contract under `src/channels/`, register it
+with the channel registry, add setup and pairing behavior, then test inbound
+routing, outbound delivery, permissions, and platform formatting. Keep
+channel credentials in the host boundary.
 
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills on the `channels` or `providers` branch.
+### New MCP Tool or Service
 
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+Add the tool to the agent-runner MCP server or create a separate service. Give
+the tool the narrowest possible filesystem and network access. A new service
+needs a healthcheck, private network membership, an explicit volume boundary,
+unit tests, and an operational recovery procedure.
 
-## Community
+### New Specialist Agent
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+Prefer a focused agent contract over a general-purpose clone of Naya. Define
+the work it accepts, provider and model, files and tools, destinations, reply
+format, and failure behavior. Test its agent-to-agent route independently
+before using it in a larger workflow.
 
-## Changelog
+### Knowledge-Base Enhancements
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes, or the [full release history](https://docs.nanoclaw.dev/changelog) on the documentation site.
+The next meaningful knowledge enhancements are an authenticated Google Drive
+API export path for native Google Docs, Sheets, and Slides, richer metadata
+and permissions, and a review workflow for generated outputs before
+promotion into source folders.
+
+## Security Model
+
+- Only the host supervisor may call the Docker API.
+- Agent and knowledge containers have no Docker socket.
+- Host mounts pass an external allowlist and remain narrowly scoped.
+- The knowledge service receives only the designated Drive root and index volume.
+- Generated knowledge writes are restricted to the generated-output boundary.
+- Provider credentials are isolated per session or injected through OneCLI.
+- Agent-to-agent routing is explicit through the destination registry.
+- Telegram access is governed by pairing and authorization rules.
+- Runtime databases, credentials, logs, and Drive contents remain outside Git.
+
+This is an internal work system, not a substitute for Alteryx enterprise data
+governance. Review Drive permissions, model/data handling policies, retention,
+and agent mount scopes before connecting sensitive material.
+
+## Validation
+
+Run host checks with Node 22 available:
+
+```bash
+PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm run typecheck
+PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm exec vitest run --maxWorkers=1
+```
+
+Run knowledge checks:
+
+```bash
+docker compose --env-file .env.knowledge config --quiet
+docker compose --env-file .env.knowledge run --rm --no-deps knowledge python -m unittest discover -s tests -v
+```
+
+Build and test the agent image:
+
+```bash
+./container/build.sh
+docker run --rm --entrypoint bun -v "$PWD/container/agent-runner/src:/app/src:ro" nanoclaw-agent-v2-7166243d:latest test /app/src/poll-loop.test.ts
+```
+
+Before a release, validate knowledge health and retrieval, a fresh MCP search,
+direct Naya Telegram work, Naya-to-Forge routing, Naya-to-Scribe routing, a
+generated-output write under `40 Generated`, and no duplicate Telegram output.
+
+## Repository Map
+
+```text
+src/                         Trusted host supervisor
+src/channels/                Telegram and channel adapter infrastructure
+src/providers/               Host-side provider setup
+src/db/                      Central database and migrations
+container/agent-runner/      Isolated Bun agent runtime and MCP tools
+groups/                      Per-agent workspaces and instructions
+services/knowledge/          Dockerized Drive-backed knowledge service
+config/                      Example local configuration
+docs/                        Architecture, deployment, database, and recovery docs
+scripts/                     Development and end-to-end validation scripts
+```
+
+Supporting documents:
+
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/architecture-diagram.md`](docs/architecture-diagram.md)
+- [`docs/agent-runner-details.md`](docs/agent-runner-details.md)
+- [`docs/db.md`](docs/db.md)
+- [`docs/isolation-model.md`](docs/isolation-model.md)
+- [`docs/knowledge-base.md`](docs/knowledge-base.md)
+- [`docs/deployment.md`](docs/deployment.md)
+- [`docs/NANOAYX-RESUME.md`](docs/NANOAYX-RESUME.md)
+
+## Git and Change Management
+
+The canonical branch for this implementation is
+`codex-provider-stabilization`. Test local changes, document operational or
+architectural changes, commit with a focused message, and push to the NanoAYX
+repository. Never commit credentials, runtime state, Docker volumes, or Drive
+content.
 
 ## License
 
 MIT
-
-<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=47894bd5-353b-42fe-bb97-74144e6df0bf" />
