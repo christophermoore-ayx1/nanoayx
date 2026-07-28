@@ -324,6 +324,11 @@ async function processQuery(
   let queryContinuation: string | undefined;
   let done = false;
   let unwrappedNudged = false;
+  // Providers can emit the same completed answer more than once when a
+  // follow-up arrives while the previous turn is being finalized. Keep the
+  // idempotency window scoped to this active query so separate user wakes do
+  // not suppress one another.
+  const dispatchedResultFingerprints = new Set<string>();
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -462,7 +467,7 @@ async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { hasUnwrapped } = dispatchResultText(event.text, routing);
+          const { hasUnwrapped } = dispatchResultText(event.text, routing, dispatchedResultFingerprints);
           if (hasUnwrapped && !unwrappedNudged) {
             unwrappedNudged = true;
             const destinations = getAllDestinations();
@@ -512,7 +517,11 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * The agent must always wrap output in <message to="name">...</message>
  * blocks, even with a single destination. Bare text is scratchpad only.
  */
-function dispatchResultText(text: string, routing: RoutingContext): { sent: number; hasUnwrapped: boolean } {
+export function dispatchResultText(
+  text: string,
+  routing: RoutingContext,
+  dispatchedFingerprints: Set<string> = new Set(),
+): { sent: number; hasUnwrapped: boolean } {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
@@ -534,6 +543,21 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
+    const fingerprint = [
+      routing.inReplyTo ?? '',
+      dest.type,
+      dest.type === 'channel' ? dest.channelType : 'agent',
+      dest.type === 'channel' ? dest.platformId : dest.agentGroupId,
+      body,
+    ].join('\u0000');
+    if (dispatchedFingerprints.has(fingerprint)) {
+      log(`Suppressed duplicate outbound result for ${toName}`);
+      // Treat a suppressed duplicate as handled so the same result is not
+      // misclassified as an unwrapped response and nudged again.
+      sent++;
+      continue;
+    }
+    dispatchedFingerprints.add(fingerprint);
     sendToDestination(dest, body, routing);
     sent++;
   }

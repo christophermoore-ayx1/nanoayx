@@ -4,7 +4,7 @@ import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
-import { isCorruptionError } from './poll-loop.js';
+import { dispatchResultText, isCorruptionError } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 
 beforeEach(() => {
@@ -376,6 +376,49 @@ describe('end-to-end with mock provider', () => {
     expect(outMessages).toHaveLength(1);
     expect(JSON.parse(outMessages[0].content).text).toBe('The answer is 4');
     expect(outMessages[0].in_reply_to).toBe('m1');
+  });
+});
+
+describe('outbound result deduplication', () => {
+  it('suppresses identical destination/body results within one active query', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('telegram-main', 'Telegram', 'channel', 'telegram', 'chat-1', NULL)`,
+      )
+      .run();
+
+    const routing = {
+      platformId: 'chat-1',
+      channelType: 'telegram',
+      threadId: 'chat-1',
+      inReplyTo: 'in-1',
+    };
+    const seen = new Set<string>();
+
+    expect(dispatchResultText('<message to="telegram-main">FORGE READY.</message>', routing, seen).sent).toBe(1);
+    expect(dispatchResultText('<message to="telegram-main">FORGE READY.</message>', routing, seen).sent).toBe(1);
+    expect(getUndeliveredMessages()).toHaveLength(1);
+  });
+
+  it('does not suppress distinct destinations with the same body', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('telegram-main', 'Telegram', 'channel', 'telegram', 'chat-1', NULL),
+                ('telegram-other', 'Other', 'channel', 'telegram', 'chat-2', NULL)`,
+      )
+      .run();
+
+    const routing = { platformId: 'chat-1', channelType: 'telegram', threadId: 'chat-1', inReplyTo: 'in-1' };
+    const result = dispatchResultText(
+      '<message to="telegram-main">done</message><message to="telegram-other">done</message>',
+      routing,
+      new Set(),
+    );
+
+    expect(result.sent).toBe(2);
+    expect(getUndeliveredMessages()).toHaveLength(2);
   });
 });
 
