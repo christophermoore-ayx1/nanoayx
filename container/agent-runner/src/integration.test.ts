@@ -346,6 +346,24 @@ describe('poll loop — provider error recovery', () => {
 
     await loopPromise.catch(() => {});
   });
+
+  it('does not bounce provider errors back to agent destinations', async () => {
+    insertMessage(
+      'm-agent-error',
+      { sender: 'Parent Agent', text: 'trigger error' },
+      { platformId: 'parent-agent', channelType: 'agent' },
+    );
+
+    const provider = new ThrowingProvider('usage limit reached');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 2000);
+
+    await waitFor(() => getPendingMessages().length === 0, 2000);
+    controller.abort();
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    await loopPromise.catch(() => {});
+  });
 });
 
 describe('poll loop — stale session recovery', () => {

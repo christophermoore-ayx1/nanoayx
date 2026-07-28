@@ -6,3 +6,4 @@ import './claude.js';
 import './mock.js';
 
 import './codex.js';
+import './ollama.js';

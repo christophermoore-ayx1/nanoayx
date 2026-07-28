@@ -19,6 +19,7 @@ vi.mock('child_process', () => ({
 
 import {
   CONTAINER_RUNTIME_BIN,
+  containerNetworkArgs,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
@@ -37,6 +38,20 @@ describe('readonlyMountArgs', () => {
   it('returns -v flag with :ro suffix', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
     expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+  });
+});
+
+describe('containerNetworkArgs', () => {
+  it('returns no flags when a network is not configured', () => {
+    expect(containerNetworkArgs(undefined)).toEqual([]);
+  });
+
+  it('returns a network flag for a valid Docker network name', () => {
+    expect(containerNetworkArgs('nanoayx-runtime')).toEqual(['--network', 'nanoayx-runtime']);
+  });
+
+  it('rejects values that could alter the Docker command', () => {
+    expect(() => containerNetworkArgs('runtime --privileged')).toThrow('Invalid container network');
   });
 });
 

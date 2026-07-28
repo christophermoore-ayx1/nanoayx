@@ -2,6 +2,10 @@
 
 NanoClaw is a personal Codex assistant system. The host is a Node process that routes messages into per-session agent containers; each container runs an agent runner that calls Codex and writes responses back for delivery.
 
+The canonical NanoAYX worktree on this host is
+`/Users/christopher.moore/Projects/NanoAYX/nanoclaw`. Treat checkouts under
+`Documents/NanoAYX` as rollback copies.
+
 ## First Rule
 
 Run commands directly when you can. Do not ask the user to run routine build, test, search, or inspection commands unless an interactive terminal, credentials, or explicit human approval is required.
@@ -83,6 +87,10 @@ Do not assume the `sqlite3` binary exists.
 Per-agent-group runtime config lives in the `container_configs` table and is materialized to `groups/<folder>/container.json` when spawning containers. It controls provider, model, packages, mounts, and related runtime options.
 
 The default provider goal is Codex. Provider-specific auth should come from Codex login state or OpenAI-compatible environment configuration, not raw credentials pasted into chat.
+
+NanoAYX also includes a deliberately tool-free `ollama` provider for delegated
+summarization, classification, extraction, and drafting. Keep complex work and
+anything requiring MCP tools on `codex`.
 
 ## Codex Auth
 
@@ -173,6 +181,7 @@ Container logs are usually lost after container exit because containers run with
 | --- | --- |
 | `docs/NANOAYX-RESUME.md` | Current NanoAYX checkpoint, decisions, verified state, and restart instructions |
 | `docs/knowledge-base.md` | Google Drive boundary, folder layout, mount configuration, and RAG storage policy |
+| `docs/deployment.md` | Native/container split, startup, recovery, and release validation |
 | `docs/architecture.md` | Full architecture |
 | `docs/db.md` | Three-DB model |
 | `docs/db-central.md` | Central DB schema and migrations |

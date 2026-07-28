@@ -17,6 +17,22 @@
 
 ---
 
+## NanoAYX Fork
+
+This repository is the internal Alteryx-oriented NanoAYX fork. Its deployed
+profile uses Telegram, a GPT-5.4 coordinator and implementation agent, a
+tool-free local Ollama text worker, and a Dockerized knowledge service backed
+by a designated Google Drive Desktop folder.
+
+Start with:
+
+- [NanoAYX resume checkpoint](docs/NANOAYX-RESUME.md)
+- [Deployment and recovery](docs/deployment.md)
+- [Knowledge-base boundary](docs/knowledge-base.md)
+- [Local Ollama provider](docs/ollama.md)
+
+The remaining README describes the NanoClaw foundation and upstream behavior.
+
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.

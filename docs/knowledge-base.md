@@ -1,27 +1,15 @@
 # NanoAYX Knowledge Base
 
-## Canonical Source
+## Boundary
 
-NanoAYX uses a dedicated Google Drive folder as the canonical source-document
-and human-readable output boundary:
+Google Drive is the canonical source and human-readable output boundary:
 
 ```text
 Name: NanoAYX Knowledge Base
-Drive folder ID: 1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
-Drive URL: https://drive.google.com/drive/folders/1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
-Location: Alteryx My Drive
+Folder ID: 1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
+URL: https://drive.google.com/drive/folders/1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
+Host: /Users/christopher.moore/Library/CloudStorage/GoogleDrive-christopher.moore@alteryx.com/My Drive/NanoAYX Knowledge Base
 ```
-
-Google Drive Desktop exposes it on the current host at:
-
-```text
-/Users/christopher.moore/Library/CloudStorage/GoogleDrive-christopher.moore@alteryx.com/My Drive/NanoAYX Knowledge Base
-```
-
-The host path is installation-specific. Resolve and verify it again when
-NanoAYX is installed on another machine.
-
-## Folder Layout
 
 ```text
 NanoAYX Knowledge Base/
@@ -33,70 +21,81 @@ NanoAYX Knowledge Base/
   90 Archive/
 ```
 
-- `00 Inbox` receives unclassified material.
-- `10 Sources` holds canonical reference documents.
-- `20 Notes` holds curated notes and durable summaries.
-- `30 Projects` holds project-specific working knowledge.
-- `40 Generated` receives agent-created, human-readable outputs.
-- `90 Archive` holds retired material that should remain discoverable.
+The scanner reads the source folders. API and MCP writes are restricted to
+Markdown or text files beneath `40 Generated`.
 
-## Container Boundary
+## Service
 
-The exact Drive root is the only Google Drive path allowlisted in:
+`services/knowledge` is a FastAPI service deployed by the root `compose.yaml`.
+It:
 
-```text
-~/.config/nanoclaw/mount-allowlist.json
+- scans configured folders on startup and every five minutes;
+- hashes files for incremental re-indexing;
+- extracts plain text, Markdown, PDF, and DOCX content;
+- chunks text and calls host Ollama's `/api/embed`;
+- stores documents, chunks, vectors, and errors in SQLite;
+- removes records for deleted files;
+- returns source paths, Drive item IDs when available, and Drive URLs;
+- writes generated files atomically within `40 Generated`.
+
+The service listens only on `127.0.0.1:8787` from the host and is reachable by
+agent containers as `http://nanoayx-knowledge:8787` on `nanoayx-runtime`.
+
+## Deploy
+
+Create the ignored local configuration from
+`config/knowledge.env.example`, then:
+
+```bash
+docker compose --env-file .env.knowledge build knowledge
+docker compose --env-file .env.knowledge run --rm --no-deps knowledge \
+  python -m unittest discover -s tests -v
+docker compose --env-file .env.knowledge up -d knowledge
+curl http://127.0.0.1:8787/health
 ```
 
-The active `nanoayx` agent group requests the mount through its
-`container_configs.additional_mounts` row. NanoClaw validates the real host
-path against the external allowlist and exposes it read/write at:
+The durable index is stored in the `nanoayx-kb-data` Docker volume. It is
+derived state and can be rebuilt from Drive.
+
+## API
 
 ```text
-/workspace/extra/knowledge/drive
+GET  /health
+GET  /stats
+POST /ingest
+POST /search   {"query":"...", "limit":5}
+POST /outputs  {"relative_path":"project/note.md", "content":"..."}
 ```
 
-Do not allowlist the Google Drive account root, `My Drive`, `Shared drives`, or
-the parent `CloudStorage` directory. Agent groups that do not need knowledge
-access must not request this mount.
+Agents use the corresponding MCP tools:
 
-## Storage Policy
+```text
+knowledge_search
+knowledge_ingest
+knowledge_stats
+knowledge_write_output
+```
 
-Drive contains canonical documents and reviewable outputs. It must not contain:
+Knowledge retrieval and complex grounded synthesis use the GPT-5.4
+coordinator. The tool-free Ollama provider can process text delegated to it,
+but it does not search the index itself.
 
-- credentials, `.env` files, API tokens, or authentication state;
-- NanoClaw source code or Git worktrees;
-- SQLite databases, lock files, session state, or queues;
-- vector indexes, embedding caches, or other frequently rewritten derived
-  state.
+## Supported Content
 
-Keep the RAG index and ingestion state in a local Docker volume. Store the Drive
-file ID, relative path, content hash, modified time, parser version, embedding
-model, and embedding dimension in the index so changes can be reconciled
-incrementally.
+Supported directly: `.txt`, `.md`, `.markdown`, `.rst`, `.csv`, `.tsv`,
+`.json`, `.yaml`, `.yml`, `.log`, `.html`, `.htm`, `.pdf`, and `.docx`.
 
-## Verified State
+Native `.gdoc`, `.gsheet`, and `.gslides` pointer files are recorded as
+ingestion errors because they contain metadata rather than document bodies.
+Indexing native Google files requires a future authenticated Drive API export
+adapter.
 
-On 2026-07-26:
+## Security and Storage
 
-- Drive metadata and the Desktop item ID matched.
-- Drive Desktop reported the folder downloaded, recursively downloaded, and
-  available offline.
-- The six canonical child folders existed in Drive and on the local mount.
-- NanoClaw's mount validator approved the exact host path for read/write.
-- A disposable `node:22-alpine` container read the folder hierarchy and
-  confirmed write permission at `/workspace/extra/knowledge/drive`.
+Do not put credentials, runtime databases, session queues, vector indexes,
+lock files, or Git worktrees in Drive. The exact Drive root is allowlisted in
+`~/.config/nanoclaw/mount-allowlist.json`; broader Google Drive paths must not
+be allowlisted.
 
-## Remaining Work
-
-1. Add a Drive scanner that hashes supported source files and queues changed
-   documents.
-2. Implement one consistent local vector-store backend.
-3. Select and pin one Ollama embedding model and dimension for ingest and
-   retrieval.
-4. Use Ollama for routine extraction, tagging, and summaries.
-5. Use GPT-5.4 for complex synthesis and grounded final answers.
-6. Emit citations containing the Drive file ID and relative source path.
-7. Add deletion handling and retrieval evaluation fixtures.
-8. Revisit moving the folder to an Alteryx Shared Drive if the knowledge base
-   should be organization-owned instead of user-owned.
+The knowledge container has no Docker socket. Agent containers have no Docker
+socket. The host supervisor validates mounts and owns container lifecycle.

@@ -1,0 +1,45 @@
+name: nanoayx-knowledge
+
+services:
+  knowledge:
+    build:
+      context: ./services/knowledge
+    container_name: nanoayx-knowledge
+    restart: unless-stopped
+    environment:
+      KNOWLEDGE_ROOT: /knowledge/drive
+      KNOWLEDGE_DB_PATH: /data/knowledge.db
+      KNOWLEDGE_DRIVE_FOLDER_ID: ${KNOWLEDGE_DRIVE_FOLDER_ID}
+      KNOWLEDGE_SCAN_DIRS: ${KNOWLEDGE_SCAN_DIRS:-00 Inbox,10 Sources,20 Notes,30 Projects,90 Archive}
+      KNOWLEDGE_SCAN_INTERVAL_SECONDS: ${KNOWLEDGE_SCAN_INTERVAL_SECONDS:-300}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-embeddinggemma}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:8787:8787
+    volumes:
+      - type: bind
+        source: ${NANOAYX_KNOWLEDGE_PATH}
+        target: /knowledge/drive
+      - knowledge-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - runtime
+
+volumes:
+  knowledge-data:
+    name: nanoayx-kb-data
+
+networks:
+  runtime:
+    name: nanoayx-runtime

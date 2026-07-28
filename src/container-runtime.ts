@@ -25,6 +25,15 @@ export function readonlyMountArgs(hostPath: string, containerPath: string): stri
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
+/** Returns CLI args for an optional, validated Docker network name. */
+export function containerNetworkArgs(network: string | undefined): string[] {
+  if (!network) return [];
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(network)) {
+    throw new Error(`Invalid container network: ${network}`);
+  }
+  return ['--network', network];
+}
+
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {

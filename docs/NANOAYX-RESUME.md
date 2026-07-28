@@ -1,205 +1,122 @@
 # NanoAYX Resume Checkpoint
 
-Updated: 2026-07-26
+Updated: 2026-07-27
 
-## Resume Here
-
-Use this worktree as the implementation source:
+## Canonical Worktree
 
 ```text
-/Users/christopher.moore/Documents/NanoAYX/nanoclaw
+/Users/christopher.moore/Projects/NanoAYX/nanoclaw
 ```
 
-Current branch:
+Branch: `codex-provider-stabilization`
 
-```text
-codex-provider-stabilization
-```
+Repository: `https://github.com/christophermoore-ayx1/nanoayx`
 
-The intended GitHub destination is:
+The old checkout under `/Users/christopher.moore/Documents/NanoAYX/nanoclaw`
+is rollback-only. `/Users/christopher.moore/nanoclaw-v2` remains an upstream
+comparison checkout.
 
-```text
-https://github.com/christophermoore-ayx1/nanoayx
-```
+## Operational Architecture
 
-The target repository currently contains only a two-line initial README. Keep
-the NanoClaw upstream history and merge the target's initial commit later so
-updating `main` does not require a force push.
+- A macOS LaunchAgent runs the trusted host supervisor.
+- Per-session GPT-5.4 agents run in isolated Docker containers.
+- Telegram is provided by the supervisor's installed adapter.
+- The knowledge service runs in Docker on `nanoayx-runtime`.
+- Google Drive Desktop provides the host filesystem source boundary.
+- Ollama runs natively and provides `embeddinggemma` embeddings.
+- No application container receives the Docker socket.
 
-## Objective
+The LaunchAgent label is `com.nanoclaw-v2-2f3dfabc`. Its plist points at the
+canonical worktree and sets `NANOCLAW_DOCKER_NETWORK=nanoayx-runtime`.
 
-Build a Docker-isolated, Codex-first NanoClaw fork for internal Alteryx work:
-
-- Telegram is the user-facing channel.
-- GPT-5.4 handles complex reasoning, coding, Alteryx work, and final synthesis.
-- Ollama handles routine text, ingestion summaries, tagging, and other lower
-  complexity work.
-- Agent groups provide coordinator and specialist/sub-agent isolation.
-- A designated Alteryx Google Drive folder is the read/write document boundary.
-- Source, runtime databases, secrets, and vector indexes remain outside Drive.
-
-## Local Implementations
-
-### Canonical candidate
-
-`/Users/christopher.moore/Documents/NanoAYX/nanoclaw`
-
-This is the most complete NanoClaw-based implementation. It contains the
-in-progress Codex provider, Telegram adapter, agent-to-agent changes, Codex
-instruction composition, and tests.
-
-### Upstream reference
-
-`/Users/christopher.moore/nanoclaw-v2`
-
-This is a clean NanoClaw v2 clone with a smaller, incomplete Codex provider
-change set. Preserve it as an upstream comparison source.
-
-### Running legacy prototype
-
-`/Users/christopher.moore/nanoayx`
-
-This Python/FastAPI implementation currently runs `nanoayx-api` and
-`nanoayx-worker` containers. It has configured Telegram, Ollama, and Alteryx
-MCP settings, but it lacks NanoClaw's per-agent container isolation and only
-returns a textual Codex handoff. Do not stop or remove it until the NanoClaw
-fork passes an end-to-end cutover test.
-
-## Verified State
-
-In the canonical candidate:
-
-- Host TypeScript build passes with Node 22.
-- Agent-runner TypeScript typecheck passes.
-- All 13 Codex provider tests pass under Bun.
-- The host suite reported 380 passing tests.
-- Seven `scripts/q.test.ts` failures were caused by sandbox-denied TSX IPC;
-  all seven pass when rerun outside the sandbox.
-- A full parallel Vitest run also hit the macOS open-file limit in Telegram
-  pairing tests. Rerun with constrained workers before release.
-- The launch agent `com.nanoclaw-v2-2f3dfabc` is not currently active and last
-  reported `EX_CONFIG`; inspect current logs and run a foreground smoke test.
-- Ollama is installed at `/usr/local/bin/ollama`, but its daemon was not
-  listening on port 11434 at checkpoint time.
-- Codex host authentication exists. Never commit or print its contents.
-
-Known-good build prefix:
-
-```bash
-PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm run build
-```
-
-## Google Drive Configuration
-
-Google Drive Desktop is signed into the Alteryx account. The knowledge base is
-currently user-owned in My Drive:
+## Knowledge Base
 
 ```text
 Drive folder ID: 1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
 Drive URL: https://drive.google.com/drive/folders/1B5BMKeFQiSquksNZh9J8iAam3Cl40CS8
 Host path: /Users/christopher.moore/Library/CloudStorage/GoogleDrive-christopher.moore@alteryx.com/My Drive/NanoAYX Knowledge Base
-Container path: /workspace/extra/knowledge/drive
+Service: http://127.0.0.1:8787
+Agent service name: http://nanoayx-knowledge:8787
 ```
 
-The folder is available offline. The exact host path is allowlisted for
-read/write access and assigned only to the current `nanoayx` agent group. The
-mount validator and an isolated Docker bind-mount test both pass.
+The Drive folder contains canonical source documents and reviewable outputs.
+The derived SQLite vector index lives in the `nanoayx-kb-data` Docker volume.
 
-Recommended Drive layout:
+## Model Routing
+
+The current coordinator config is pinned to:
 
 ```text
-NanoAYX Knowledge Base/
-  00 Inbox/
-  10 Sources/
-  20 Notes/
-  30 Projects/
-  40 Generated/
-  90 Archive/
+provider=codex
+model=gpt-5.4
+effort=high
 ```
 
-Do not place SQLite databases, vector indexes, lock files, credentials, Git
-worktrees, or NanoClaw runtime state in Google Drive. Store derived indexes in
-a local Docker volume and treat Drive files as canonical source documents and
-human-readable outputs. See `docs/knowledge-base.md` for the complete boundary
-and implementation status.
+Ollama is installed natively with `embeddinggemma:latest` for retrieval and
+`lfm2.5:8b` for low-complexity text workers. The Ollama provider is intentionally
+stateless and tool-free: it is suitable for delegated summarization,
+classification, extraction, and drafting. The Telegram coordinator uses
+GPT-5.4.
 
-## Journey Knowledge Base Kit
+Current agent topology:
 
-Requested source:
+| Agent | Provider | Model | Role |
+| --- | --- | --- | --- |
+| Naya | `codex` | `gpt-5.4`, high | Telegram coordinator, retrieval, synthesis |
+| Forge | `codex` | `gpt-5.4`, high | Complex implementation and Alteryx work |
+| Scribe | `ollama` | `lfm2.5:8b` | Tool-free text transformations |
 
-```text
-https://www.journeykits.ai/browse/kits/matt-clawd/knowledge-base-raginstall
+## Recovery
+
+From the canonical worktree:
+
+```bash
+docker start onecli-postgres-1 onecli
+docker compose --env-file .env.knowledge up -d knowledge
+PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm run build
+/bin/zsh -lc 'launchctl kickstart -k gui/$(id -u)/com.nanoclaw-v2-2f3dfabc'
 ```
 
-Canonical kit reference:
+Health checks:
 
-```text
-matt-clawd/knowledge-base-rag
+```bash
+docker ps --filter name=nanoayx-knowledge
+curl http://127.0.0.1:8787/health
+/bin/zsh -lc 'launchctl print gui/$(id -u)/com.nanoclaw-v2-2f3dfabc'
 ```
 
-Do not install the current kit unchanged. The Codex install manifest was
-inspected and has material inconsistencies:
+Do not commit `.env`, `.env.knowledge`, `data/`, `groups/`, logs, credentials,
+or Drive contents.
 
-- It defaults to Anthropic Claude instead of GPT-5.4.
-- It describes SQLCipher but the bundled implementation uses Supabase.
-- It imports missing `../../../shared/embeddings` and `shared/event-log`
-  modules.
-- `@supabase/supabase-js` is imported but absent from `package.json`.
-- The bundled `source_links` schema does not match the application queries.
-- The `match_chunks` SQL function does not accept all parameters sent by the
-  application.
-- The package declares scripts that are not all present in the manifest.
-- It includes external install/outcome telemetry instructions. Do not send
-  internal Alteryx installation or usage telemetry without explicit approval.
+## Verified
 
-Adaptation target:
+- The canonical LaunchAgent runs from the new worktree.
+- Host typecheck and focused container-runtime tests pass.
+- The knowledge image builds and its unit tests pass.
+- Drive ingestion, Ollama embeddings, semantic retrieval, citations, deletion,
+  and restricted generated-output writes are implemented.
+- A real Drive source was indexed and retrieved through the HTTP service.
+- Agent MCP tools exist for search, ingestion, stats, and generated outputs.
+- The rebuilt agent image can reach the knowledge service on the private
+  runtime network and use its MCP tools.
+- Telegram delivered a GPT-5.4 retrieval response with a Drive citation.
+- Naya created Forge and Scribe through the normal agent-to-agent workflow.
+- Fresh child containers materialized the expected provider/model settings.
+- Scribe completed an Ollama agent-to-agent round trip with clean output.
+- Provider failures on agent routes are suppressed instead of bouncing
+  recursively between agents.
 
-- Vendor reviewed source into the NanoAYX repository rather than executing a
-  remote install blindly.
-- Use GPT-5.4 for complex synthesis and grounded final answers.
-- Use Ollama for routine summaries, tagging, extraction cleanup, and preferably
-  local embeddings.
-- Keep one embedding provider/model/dimension fixed for both ingest and query.
-- Replace missing shared modules with NanoAYX-owned interfaces.
-- Choose and implement one storage backend consistently.
-- Add file hashing, incremental re-indexing, source citations, deletion, and
-  retrieval evaluation tests.
-- Add a Drive scanner for supported documents under `/knowledge/drive`.
+## Current External Condition
 
-## Recommended Agent Topology
+The ChatGPT/Codex account reached its GPT-5.4 usage limit during the final
+Forge reply check on 2026-07-27. Earlier Naya GPT-5.4 Telegram, MCP retrieval,
+and child-creation turns succeeded, and the fresh Forge container was verified
+as `codex/gpt-5.4/high`. Retry one Forge message after the account limit resets.
 
-- `Naya`: coordinator, GPT-5.4.
-- `Forge`: complex coding, Alteryx, and workflow work, GPT-5.4.
-- `Scribe`: summaries, drafting, tagging, and ingestion cleanup, Ollama.
-- One Telegram bot routes explicit mentions and allows Naya to delegate using
-  NanoClaw agent-to-agent destinations.
+## Deferred Governance Decisions
 
-This topology is recommended but still needs explicit confirmation.
-
-## Decisions Needed After Restart
-
-1. Confirm this NanoClaw worktree is the canonical project.
-2. Decide whether the current My Drive folder should eventually move to an
-   Alteryx Shared Drive for organization ownership.
-3. Confirm the approved OpenAI credential path:
-   - Alteryx-managed API key protected through OneCLI, preferred for internal
-     use; or
-   - existing ChatGPT/Codex subscription authentication.
-4. Confirm the Naya/Forge/Scribe topology.
-5. Select the Ollama chat and embedding models after starting Ollama and
-   listing locally available models.
-6. Choose local storage for the RAG index versus a governed Supabase project.
-   Prefer local storage unless Alteryx has approved Supabase for this data.
-
-## Next Execution Steps
-
-1. Start Ollama and list installed models.
-2. Repair the launch-agent failure and complete a Codex CLI smoke test.
-3. Finish the Codex provider security review, especially credential exposure
-   inside containers.
-4. Stabilize the Telegram round trip and agent-to-agent delivery.
-5. Implement the Drive scanner and knowledge-base adaptation.
-6. Add targeted tests and run constrained full-suite validation.
-7. Build the agent image and run end-to-end Telegram tests.
-8. Merge the target repository's initial commit, update `main`, and document
-   upstream synchronization.
+- Move the knowledge folder to an Alteryx Shared Drive if it needs
+  organization ownership instead of user ownership.
+- Add a Google Drive API exporter if native Google Docs, Sheets, and Slides
+  must be indexed. Drive Desktop pointer files alone do not contain document
+  bodies.

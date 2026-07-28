@@ -250,15 +250,22 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         clearContinuation(config.providerName);
       }
 
-      // Write error response so the user knows something went wrong
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({ text: `Error: ${errMsg}` }),
-      });
+      // Report provider failures to human-facing channels. Returning an error
+      // as an agent-to-agent chat can create a retry loop when the caller's
+      // provider is also unavailable: each side treats the other's error as a
+      // fresh prompt and sends another error back.
+      if (routing.channelType !== 'agent') {
+        writeMessageOut({
+          id: generateId(),
+          kind: 'chat',
+          platform_id: routing.platformId,
+          channel_type: routing.channelType,
+          thread_id: routing.threadId,
+          content: JSON.stringify({ text: `Error: ${errMsg}` }),
+        });
+      } else {
+        log(`Provider error suppressed for agent destination ${routing.platformId ?? '(unknown)'}`);
+      }
     } finally {
       clearCurrentInReplyTo();
     }
