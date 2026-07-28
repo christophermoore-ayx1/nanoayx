@@ -19,7 +19,10 @@
 import fs from 'fs';
 import path from 'path';
 
+import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig, type VolumeMount } from './provider-container-registry.js';
+
+const localEnv = readEnvFile(['CODEX_TURN_TIMEOUT_MS']);
 
 registerProviderContainerConfig('codex', (ctx) => {
   const codexDir = path.join(ctx.sessionDir, 'codex');
@@ -40,8 +43,8 @@ registerProviderContainerConfig('codex', (ctx) => {
   }
 
   const env: Record<string, string> = {};
-  for (const key of ['OPENAI_API_KEY', 'CODEX_MODEL', 'OPENAI_BASE_URL'] as const) {
-    const value = ctx.hostEnv[key];
+  for (const key of ['OPENAI_API_KEY', 'CODEX_MODEL', 'OPENAI_BASE_URL', 'CODEX_TURN_TIMEOUT_MS'] as const) {
+    const value = ctx.hostEnv[key] || (key === 'CODEX_TURN_TIMEOUT_MS' ? localEnv[key] : undefined);
     if (value) env[key] = value;
   }
 

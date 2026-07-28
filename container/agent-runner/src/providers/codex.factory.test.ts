@@ -5,7 +5,13 @@ import path from 'path';
 import { describe, it, expect } from 'bun:test';
 
 import { createProvider } from './factory.js';
-import { CodexProvider, resolveClaudeImports } from './codex.js';
+import {
+  CODEX_TURN_TIMEOUT_DEFAULT_MS,
+  CODEX_TURN_TIMEOUT_MAX_MS,
+  CodexProvider,
+  parseCodexTurnTimeoutMs,
+  resolveClaudeImports,
+} from './codex.js';
 import {
   type AppServer,
   STALE_THREAD_RE,
@@ -19,6 +25,14 @@ function scratchDir(): string {
 }
 
 describe('createProvider (codex)', () => {
+  it('uses a safe configurable turn timeout', () => {
+    expect(parseCodexTurnTimeoutMs(undefined)).toBe(CODEX_TURN_TIMEOUT_DEFAULT_MS);
+    expect(parseCodexTurnTimeoutMs('900000')).toBe(900000);
+    expect(parseCodexTurnTimeoutMs('999999999')).toBe(CODEX_TURN_TIMEOUT_MAX_MS);
+    expect(parseCodexTurnTimeoutMs('not-a-number')).toBe(CODEX_TURN_TIMEOUT_DEFAULT_MS);
+    expect(parseCodexTurnTimeoutMs('1000')).toBe(CODEX_TURN_TIMEOUT_DEFAULT_MS);
+  });
+
   it('returns CodexProvider for codex', () => {
     expect(createProvider('codex')).toBeInstanceOf(CodexProvider);
   });

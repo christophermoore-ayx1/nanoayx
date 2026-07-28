@@ -21,6 +21,13 @@ Agent providers:
 - `codex` runs GPT-5.4 with MCP tools for complex, tool-heavy work.
 - `ollama` runs a local model for stateless, tool-free text transformations.
 
+Codex turns default to a 15-minute provider ceiling, below the host's
+30-minute liveness ceiling. Set `CODEX_TURN_TIMEOUT_MS` in the supervisor
+environment or `.env` to tune it; values are bounded to 60 seconds through
+25 minutes. Timeouts are surfaced with provider diagnostics and are not
+blindly retried because a timed-out turn may already have changed files or
+sent messages.
+
 This layout containerizes application work without placing the Docker socket
 or broad host filesystem access inside a long-running application container.
 

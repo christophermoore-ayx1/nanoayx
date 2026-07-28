@@ -32,8 +32,15 @@ import {
   writeCodexMcpConfigToml,
 } from './codex-app-server.js';
 
-/** Hard ceiling for a single turn. Guards against app-server wedging. */
-const TURN_TIMEOUT_MS = 5 * 60 * 1000;
+/** Default ceiling for a single turn. Leaves room below the host's 30-minute SLA. */
+export const CODEX_TURN_TIMEOUT_DEFAULT_MS = 15 * 60 * 1000;
+export const CODEX_TURN_TIMEOUT_MAX_MS = 25 * 60 * 1000;
+
+export function parseCodexTurnTimeoutMs(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 60_000) return CODEX_TURN_TIMEOUT_DEFAULT_MS;
+  return Math.min(Math.floor(parsed), CODEX_TURN_TIMEOUT_MAX_MS);
+}
 
 // ── System-prompt assembly ──────────────────────────────────────────────────
 // NanoClaw composes CODEX.md from @-import directives so the same shared
@@ -108,11 +115,13 @@ export class CodexProvider implements AgentProvider {
   private readonly mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
   private readonly model: string | undefined;
   private readonly effort: string | undefined;
+  private readonly turnTimeoutMs: number;
 
   constructor(options: ProviderOptions = {}) {
     this.mcpServers = options.mcpServers ?? {};
     this.model = (options.env?.CODEX_MODEL as string | undefined) ?? options.model;
     this.effort = options.effort;
+    this.turnTimeoutMs = parseCodexTurnTimeoutMs(options.env?.CODEX_TURN_TIMEOUT_MS);
   }
 
   isSessionInvalid(err: unknown): boolean {
@@ -181,6 +190,7 @@ export class CodexProvider implements AgentProvider {
             self.model,
             self.effort,
             input.cwd,
+            self.turnTimeoutMs,
             () => initYielded,
             () => {
               initYielded = true;
@@ -222,6 +232,7 @@ async function* runOneTurn(
   model: string | undefined,
   effort: string | undefined,
   cwd: string,
+  turnTimeoutMs: number,
   hasInit: () => boolean,
   markInit: () => void,
 ): AsyncGenerator<ProviderEvent> {
@@ -230,6 +241,8 @@ async function* runOneTurn(
   const turnState: { error: Error | null } = { error: null };
   let resultText = '';
   let turnDone = false;
+  let notificationCount = 0;
+  let lastNotificationMethod = 'none';
 
   // Buffered event queue so we can `yield` across the async notification
   // callback. Each notification pushes zero or more ProviderEvents; the
@@ -242,6 +255,8 @@ async function* runOneTurn(
   };
 
   const handler = (n: JsonRpcNotification): void => {
+    notificationCount++;
+    lastNotificationMethod = n.method;
     const method = n.method;
     const params = n.params;
 
@@ -306,10 +321,14 @@ async function* runOneTurn(
   server.notificationHandlers.push(handler);
 
   const timer = setTimeout(() => {
-    turnState.error = new Error(`Turn timed out after ${TURN_TIMEOUT_MS}ms`);
+    turnState.error = new Error(
+      `Codex turn timed out after ${turnTimeoutMs}ms ` +
+        `(model=${model || 'default'}, effort=${effort || 'default'}, ` +
+        `notifications=${notificationCount}, last=${lastNotificationMethod})`,
+    );
     turnDone = true;
     kick();
-  }, TURN_TIMEOUT_MS);
+  }, turnTimeoutMs);
 
   try {
     // If we yield init before turn/start, the poll-loop stores
