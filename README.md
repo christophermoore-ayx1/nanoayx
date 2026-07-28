@@ -440,6 +440,7 @@ scripts/                     Development and end-to-end validation scripts
 
 Supporting documents:
 
+- [docs/gcp-migration-phase-2.md](docs/gcp-migration-phase-2.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/architecture-diagram.md`](docs/architecture-diagram.md)
 - [`docs/agent-runner-details.md`](docs/agent-runner-details.md)
