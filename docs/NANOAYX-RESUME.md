@@ -106,12 +106,12 @@ or Drive contents.
 - Provider failures on agent routes are suppressed instead of bouncing
   recursively between agents.
 
-## Current External Condition
+## Final Provider Validation
 
-The ChatGPT/Codex account reached its GPT-5.4 usage limit during the final
-Forge reply check on 2026-07-27. Earlier Naya GPT-5.4 Telegram, MCP retrieval,
-and child-creation turns succeeded, and the fresh Forge container was verified
-as `codex/gpt-5.4/high`. Retry one Forge message after the account limit resets.
+On 2026-07-28, after the account limit reset, a fresh Naya request spawned a
+new Forge container with `codex/gpt-5.4/high`. Forge returned exactly
+`FORGE READY`, the reply routed back to Naya, and Naya delivered the result to
+Telegram.
 
 ## Deferred Governance Decisions
 
